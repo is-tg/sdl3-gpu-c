@@ -302,7 +302,11 @@ static
 void* file_open(const char* path, void* user_data)
 {
     (void)(user_data);
-    return fopen(path, "rb");
+    FILE *file = NULL;
+    if (fopen_s(&file, path, "rb") != 0) {
+        return NULL;
+    }
+    return file;
 }
 
 

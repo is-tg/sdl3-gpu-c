@@ -1,5 +1,8 @@
 #define SDL_MAIN_USE_CALLBACKS
 #define STB_IMAGE_IMPLEMENTATION
+#define STBI_MALLOC SDL_malloc
+#define STBI_REALLOC SDL_realloc
+#define STBI_FREE SDL_free
 #define FAST_OBJ_IMPLEMENTATION
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL.h>
@@ -7,15 +10,15 @@
 #include "fast_obj.h"
 #include "linalg.h"
 
-#define ASPECT_RATIO_FACTOR 75
 #define DARK 0x1A1A1D
 
 typedef struct {
     SDL_Window *window;
     SDL_GPUDevice *gpu;
     SDL_GPUGraphicsPipeline *pipeline;
-    SDL_GPUSampler *sampler;
     SDL_GPUTexture *texture;
+    SDL_GPUTexture *depth_texture;
+    SDL_GPUSampler *sampler;
 } AppState;
 
 struct {
@@ -28,9 +31,10 @@ struct {
     matrix4 mvp;
 } ubo;
 
-SDL_GPUBuffer *vertex_buf;
-SDL_GPUBuffer *index_buf;
-Uint32 num_indices;
+static const int ASPECT_RATIO_FACTOR = 75;
+SDL_GPUBuffer *vertex_buf = NULL;
+SDL_GPUBuffer *index_buf = NULL;
+Uint32 num_indices = 0;
 
 SDL_FColor RGBA_F(Uint32 hex, float alpha);
 SDL_AppResult SDL_Abort(const char *report);
@@ -81,6 +85,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     stbi_set_flip_vertically_on_load(1);
     Uint8 *pixels = stbi_load("colormap.png", &img_size.w, &img_size.h, NULL, 4);
     if (!pixels) {
+        SDL_Log("STBI failure: %s", stbi_failure_reason());
         return SDL_Abort("Failed to load texture image");
     }
     Uint32 pixels_byte_size = (Uint32)img_size.w * (Uint32)img_size.h * 4;
@@ -94,6 +99,21 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         .num_levels = 1,
     };
     as->texture = SDL_CreateGPUTexture(as->gpu, &texture_createinfo);
+
+    int w = 0, h = 0;
+    SDL_GetWindowSize(as->window, &w, &h);
+
+    const SDL_GPUTextureFormat DEPTH_TEXTURE_FORMAT = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
+
+    SDL_GPUTextureCreateInfo depth_tex_createinfo = {
+        .format = DEPTH_TEXTURE_FORMAT,
+        .usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+        .width = (Uint32) w,
+        .height = (Uint32) h,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+    };
+    as->depth_texture = SDL_CreateGPUTexture(as->gpu, &depth_tex_createinfo);
 
     typedef struct {
         float pos[3];
@@ -135,21 +155,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 
     fast_obj_destroy(mesh);
 
-    // 1) Compute in size_t:
-    size_t verts_bytes_sz = num_indices * sizeof *vertices;
-    size_t inds_bytes_sz  = num_indices * sizeof *indices;
-
-    // 2) Bounds-check:
-    if (verts_bytes_sz > UINT32_MAX) {
-        return SDL_Abort("Vertex buffer too big for Uint32 size");
-    }
-    if (inds_bytes_sz > UINT32_MAX) {
-        return SDL_Abort("Index buffer too big for Uint32 size");
-    }
-
-    // 3) Cast to Uint32:
-    Uint32 vertices_byte_size = (Uint32)verts_bytes_sz;
-    Uint32 indices_byte_size  = (Uint32)inds_bytes_sz;
+    Uint32 vertices_byte_size = (Uint32) num_indices * sizeof *vertices;
+    Uint32 indices_byte_size  = (Uint32) num_indices * sizeof *indices;
 
     SDL_GPUBufferCreateInfo vertbuf_createinfo = {
         .usage = SDL_GPU_BUFFERUSAGE_VERTEX,
@@ -225,10 +232,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 
     SDL_EndGPUCopyPass(copy_pass);
 
-    if (!SDL_SubmitGPUCommandBuffer(copy_cmd_buf)) {
-        return SDL_Abort("SDL_SubmitGPUCommandBuffer failed");
-    }
-
+    SDL_SubmitGPUCommandBuffer(copy_cmd_buf);
     SDL_ReleaseGPUTransferBuffer(as->gpu, transfer_buf);
     SDL_ReleaseGPUTransferBuffer(as->gpu, tex_transfer_buf);
 
@@ -266,11 +270,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
             .num_vertex_attributes = sizeof(vertex_attrs) / sizeof(vertex_attrs[0]),
             .vertex_attributes = vertex_attrs,
         },
+        .depth_stencil_state = (SDL_GPUDepthStencilState) {
+            .enable_depth_test = true,
+            .enable_depth_write = true,
+            .compare_op = SDL_GPU_COMPAREOP_LESS,
+        },
         .target_info = (SDL_GPUGraphicsPipelineTargetInfo) {
             .num_color_targets = 1,
             .color_target_descriptions = &(SDL_GPUColorTargetDescription) {
                 .format = SDL_GetGPUSwapchainTextureFormat(as->gpu, as->window),
-            }
+            },
+            .has_depth_stencil_target = true,
+            .depth_stencil_format = DEPTH_TEXTURE_FORMAT,
         }
     };
     as->pipeline = SDL_CreateGPUGraphicsPipeline(as->gpu, &pipeline_createinfo);
@@ -278,9 +289,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     SDL_ReleaseGPUShader(as->gpu, vertex_shader);
     SDL_ReleaseGPUShader(as->gpu, fragment_shader);
 
-    int w, h;
-    SDL_GetWindowSize(as->window, &w, &h);
-    
     matrix4 projection = matrix4_perspective(
         SDL_PI_F * 60 / 180, (float) w / (float) h, 0.0001f, 1000.0f
     );
@@ -338,8 +346,14 @@ SDL_AppResult SDL_AppIterate(void *appstate)
             .load_op = SDL_GPU_LOADOP_CLEAR,
             .store_op = SDL_GPU_STOREOP_STORE,
         };
+        SDL_GPUDepthStencilTargetInfo depth_target_info = {
+            .texture = as->depth_texture,
+            .load_op = SDL_GPU_LOADOP_CLEAR,
+            .clear_depth = 1,
+            .store_op = SDL_GPU_STOREOP_DONT_CARE,
+        };
         
-        SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(cmd_buf, &color_target, 1, NULL);
+        SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(cmd_buf, &color_target, 1, &depth_target_info);
         
         SDL_BindGPUGraphicsPipeline(render_pass, as->pipeline);
         
@@ -366,10 +380,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
         SDL_EndGPURenderPass(render_pass);
     }
 
-    if (!SDL_SubmitGPUCommandBuffer(cmd_buf)) {
-        return SDL_Abort("SDL_SubmitGPUCommandBuffer failed");
-    }
-    
+    SDL_SubmitGPUCommandBuffer(cmd_buf); 
     return SDL_APP_CONTINUE;
 }
 
@@ -379,10 +390,19 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
 
     if (appstate) {
         AppState *as = (AppState *) appstate;
-        SDL_ReleaseGPUTexture(as->gpu, as->texture);
+
+        SDL_ReleaseGPUBuffer(as->gpu, vertex_buf);
+        SDL_ReleaseGPUBuffer(as->gpu, index_buf);
+
+        SDL_ReleaseGPUGraphicsPipeline(as->gpu, as->pipeline);
         SDL_ReleaseGPUSampler(as->gpu, as->sampler);
+        SDL_ReleaseGPUTexture(as->gpu, as->depth_texture);
+        SDL_ReleaseGPUTexture(as->gpu, as->texture);
+
+        SDL_ReleaseWindowFromGPUDevice(as->gpu, as->window);
         SDL_DestroyGPUDevice(as->gpu);
         SDL_DestroyWindow(as->window);
+
         SDL_free(as);
     }
 }
