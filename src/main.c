@@ -30,7 +30,7 @@ struct {
 
 SDL_GPUBuffer *vertex_buf;
 SDL_GPUBuffer *index_buf;
-unsigned int num_indices;
+Uint32 num_indices;
 
 SDL_FColor RGBA_F(Uint32 hex, float alpha);
 SDL_AppResult SDL_Abort(const char *report);
@@ -119,16 +119,16 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_Abort("Failed to load OBJ file");
     }
 
-    size_t count = mesh->index_count;              // one entry per 'face-vertex'
-    Vertex_Data *vertices = SDL_malloc(count * sizeof *vertices);
-    uint16_t *indices  = SDL_malloc(count * sizeof *indices);
+    num_indices = mesh->index_count;
+    Vertex_Data *vertices = SDL_malloc(num_indices * sizeof *vertices);
+    uint16_t *indices  = SDL_malloc(num_indices * sizeof *indices);
 
     if (!vertices || !indices) {
         fast_obj_destroy(mesh);
         return SDL_Abort("Out of memory");
     }
 
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < num_indices; ++i) {
         fastObjIndex ix = mesh->indices[i];
 
         // Position comes from positions array (p is 1-based index)
@@ -151,12 +151,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         indices[i] = (uint16_t)i;
     }
 
-    num_indices = mesh->index_count;
     fast_obj_destroy(mesh);
 
     // 1) Compute in size_t:
-    size_t verts_bytes_sz = count * sizeof *vertices;
-    size_t inds_bytes_sz  = count * sizeof *indices;
+    size_t verts_bytes_sz = num_indices * sizeof *vertices;
+    size_t inds_bytes_sz  = num_indices * sizeof *indices;
 
     // 2) Bounds-check:
     if (verts_bytes_sz > UINT32_MAX) {
