@@ -78,14 +78,15 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         int w, h;
     } img_size;
 
-    Uint8 *pixels = stbi_load("file.jpg", &img_size.w, &img_size.h, NULL, 4);
+    stbi_set_flip_vertically_on_load(1);
+    Uint8 *pixels = stbi_load("colormap.png", &img_size.w, &img_size.h, NULL, 4);
     if (!pixels) {
         return SDL_Abort("Failed to load texture image");
     }
     Uint32 pixels_byte_size = (Uint32)img_size.w * (Uint32)img_size.h * 4;
 
     SDL_GPUTextureCreateInfo texture_createinfo = {
-        .format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
         .usage  = SDL_GPU_TEXTUREUSAGE_SAMPLER,
         .width  = (Uint32) img_size.w,
         .height = (Uint32) img_size.h,
@@ -102,18 +103,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 
     SDL_FColor WHITE = { 1, 1, 1, 1 };
 
-    // Vertex_Data vertices[] = {
-    //     { .pos = {-0.5,  0.5, 0}, .color = WHITE, .uv = {0, 0} },
-    //     { .pos = { 0.5,  0.5, 0}, .color = WHITE, .uv = {1, 0} },
-    //     { .pos = {-0.5, -0.5, 0}, .color = WHITE, .uv = {0, 1} },
-    //     { .pos = { 0.5, -0.5, 0}, .color = WHITE, .uv = {1, 1} },
-    // };
-
-    // Uint16 indices[] = {
-    //     0, 1, 2,
-    //     2, 1, 3,
-    // };
-
     fastObjMesh *mesh = fast_obj_read("model.obj");
     if (!mesh) {
         return SDL_Abort("Failed to load OBJ file");
@@ -129,25 +118,18 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     }
 
     for (size_t i = 0; i < num_indices; ++i) {
-        fastObjIndex ix = mesh->indices[i];
+        fastObjIndex idx = mesh->indices[i];
 
-        // Position comes from positions array (p is 1-based index)
-        float *pbase = &mesh->positions[ix.p * 3];
+        float *pbase = &mesh->positions[idx.p * 3];
         SDL_memcpy(vertices[i].pos, pbase, 3 * sizeof(float));
 
         vertices[i].color = WHITE;
 
-        // UV from texcoords (t is 1-based index; zero means “no UV”)
-        if (ix.t > 0 && (ix.t*2 + 1) < mesh->texcoord_count) {
-            float *uvbase = &mesh->texcoords[ix.t * 2];
-            vertices[i].uv[0] = uvbase[0];
-            vertices[i].uv[1] = uvbase[1];
-        } else {
-            vertices[i].uv[0] = 0.0f;
-            vertices[i].uv[1] = 0.0f;
+        if (idx.t != 0) {
+            vertices[i].uv[0] = mesh->texcoords[2 * idx.t + 0];
+            vertices[i].uv[1] = mesh->texcoords[2 * idx.t + 1];
         }
 
-        // Index just points to this vertex slot
         indices[i] = (uint16_t)i;
     }
 
@@ -250,7 +232,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     SDL_ReleaseGPUTransferBuffer(as->gpu, transfer_buf);
     SDL_ReleaseGPUTransferBuffer(as->gpu, tex_transfer_buf);
 
-    SDL_GPUSamplerCreateInfo sampler_createinfo = {0};
+    SDL_GPUSamplerCreateInfo sampler_createinfo = { 0 };
     as->sampler = SDL_CreateGPUSampler(as->gpu, &sampler_createinfo);
 
     SDL_GPUVertexAttribute vertex_attrs[] = {
@@ -303,7 +285,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         SDL_PI_F * 60 / 180, (float) w / (float) h, 0.0001f, 1000.0f
     );
     
-    matrix4 translation = matrix4_translate(0, -4, -12);
+    matrix4 translation = matrix4_translate(0, -1, -3);
     
     ubo.mvp = matrix4_multiply(&projection, &translation);
 
