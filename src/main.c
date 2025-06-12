@@ -24,14 +24,16 @@ typedef struct {
 } Model;
 
 typedef struct {
-    Vec3 position;
-    Vec3 target;
-    matrix4 model;
-    matrix4 view;
-    matrix4 projection;
+    vec3 position;
+    vec3 target;
+    mat4 model;
+    mat4 view;
+    mat4 projection;
 } Camera;
 
-typedef struct { matrix4 mvp; } UniformBufferObject;
+typedef struct {
+    ALIGN(16) mat4 mvp;
+} UniformBufferObject;
 
 typedef struct {
     TimeState time;
@@ -53,9 +55,9 @@ typedef struct {
 } AppState;
 
 typedef struct {
-    Vec3 pos;
+    vec3 pos;
     SDL_FColor color;
-    Vec2 uv;
+    vec2 uv;
 } Vertex;
 
 #define WHITE_COLOR 0xFFFFFF
@@ -238,20 +240,15 @@ bool load_model(AppState *app, const char *mesh_file, const char *texture_file)
         fastObjIndex idx = mesh->indices[i];
 
         float *positions = &mesh->positions[idx.p * 3];
-        vertices[i].pos = (Vec3) {
-            positions[0],
-            positions[1],
-            positions[2],
-        };
+        SDL_memcpy(vertices[i].pos, positions, sizeof(vec3));
 
         vertices[i].color = white;
 
         if (idx.t != 0) {
             float *texcoords = &mesh->texcoords[2 * idx.t];
-            vertices[i].uv = (Vec2) {
-                texcoords[0],
-                texcoords[1],
-            };
+            SDL_memcpy(vertices[i].uv, texcoords, sizeof(vec2));
+        } else {
+            SDL_Log("mesh index[%llu] = %d == 0", i, idx.t);
         }
 
         indices[i] = (uint16_t)i;
@@ -387,16 +384,19 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_APP_FAILURE;
     }
 
-    app->camera.position = (Vec3) { 0, 0, 3 };
-    app->camera.target   = (Vec3) { 0, 0, 0 };
-    app->camera.projection = matrix4_perspective(
-        SDL_PI_F * 60.0f / 180.0f,
-        (float)app->window_width / (float)app->window_height,
+    vec3 cam_pos = { 0, 0, 3 };
+    vec3 cam_tar = VEC3_ZERO_INIT;
+    SDL_memcpy(app->camera.position, cam_pos, sizeof(vec3));
+    SDL_memcpy(app->camera.target, cam_tar, sizeof(vec3));
+
+    perspective_lh_zo(
+        rad(60.0f),
+        16.0f / 9.0f,
         0.01f,
         1000.0f,
-        true
+        app->camera.projection
     );
-    app->camera.view = matrix4_look_at(app->camera.position, app->camera.target, VEC3_UP, true);
+    lookat_lh(app->camera.position, app->camera.target, YUP, app->camera.view);
 
     app->rotation_y = 0.0f;
 
@@ -435,9 +435,16 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     // update game state
     app->rotation_y += (SDL_PI_F / 2) * app->time.delta_time;
 
-    app->camera.model = matrix4_multiply_val(
-        matrix4_translate(0, 0, 0),
-        matrix4_rotate(app->rotation_y, 0, 1, 0)
+    vec3 translation = { 0, 0, 0 };
+    vec3 rotation    = { 0, 1, 0 };
+    mat4 translate_mat, rotate_mat;
+    translate_make(translate_mat, translation);
+    rotate_make(rotate_mat, app->rotation_y, rotation);
+
+    mat4_mul(
+        translate_mat,
+        rotate_mat,
+        app->camera.model
     );
 
     // render
@@ -449,22 +456,12 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     SDL_GPUTexture *swapchain_tex = NULL;
     SDL_WaitAndAcquireGPUSwapchainTexture(cmd_buf, app->window, &swapchain_tex, NULL, NULL);
 
-    matrix4 mvp = matrix4_multiply3(
+    mat4 *matrices[] = {
         &app->camera.projection,
         &app->camera.view,
-        &app->camera.model
-    );
-    mvp = matrix4_transpose(mvp);
-    SDL_Log("MVP:\n%f %f %f %f\n%f %f %f %f\n%f %f %f %f\n%f %f %f %f",
-        mvp.m[0], mvp.m[1], mvp.m[2], mvp.m[3],
-        mvp.m[4], mvp.m[5], mvp.m[6], mvp.m[7],
-        mvp.m[8], mvp.m[9], mvp.m[10], mvp.m[11],
-        mvp.m[12], mvp.m[13], mvp.m[14], mvp.m[15]
-    );
-
-    app->ubo = (UniformBufferObject) {
-        .mvp = mvp,
+        &app->camera.model,
     };
+    mat4_mulN(matrices, 3, app->ubo.mvp);
 
     if (swapchain_tex) {
         SDL_GPUColorTargetInfo color_target = {
