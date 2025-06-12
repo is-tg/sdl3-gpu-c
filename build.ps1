@@ -2,8 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $project_root = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$shaders_dir = "$project_root/src"
-$run_dir = "$project_root/src"
+$shaders_dir = "$project_root/shaders"
 $build_dir = "$project_root/build"
 $exe_path = "$build_dir/bin/app.exe"
 
@@ -30,8 +29,8 @@ function Confirm-Tasks {
 Set-Location $project_root
 
 Confirm-Tasks "Compile shaders?" @(
-    "glslc `"$shaders_dir/shader.glsl.frag`" -o `"$shaders_dir/shader.spv.frag`"",
-    "glslc `"$shaders_dir/shader.glsl.vert`" -o `"$shaders_dir/shader.spv.vert`""
+    "glslc $shaders_dir\shader.glsl.frag -o $shaders_dir\compiled\shader.frag.spv",
+    "glslc $shaders_dir\shader.glsl.vert -o $shaders_dir\compiled\shader.vert.spv"
 )
 
 Write-Host "🔧 Compiling project..."
@@ -39,8 +38,6 @@ cmake --build $build_dir
 
 Confirm-Tasks "Run application?" @(
     {
-        Push-Location $run_dir
         & $exe_path
-        Pop-Location
     }
 )
