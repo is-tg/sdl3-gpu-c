@@ -62,10 +62,13 @@ typedef struct {
 
 #define WHITE_COLOR 0xFFFFFF
 #define DARK_COLOR 0x1A1A1D
-#define ASPECT_RATIO_FACTOR 80
+#define EYE_HEIGHT 1
+#define MOVE_SPEED 5
 
 const SDL_GPUTextureFormat DEPTH_TEXTURE_FORMAT = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
+bool key_down[SDL_SCANCODE_COUNT] = { 0 };
 static char root_path[256] = { 0 };
+vec2 mouse_move;
 
 SDL_FColor RGBA_F(Uint32 hex, float alpha);
 SDL_AppResult SDL_Abort(const char *report);
@@ -87,10 +90,10 @@ bool app_create(void **appstate, AppState **app)
 
 bool app_init(AppState *app)
 {
-    app->window_width = 16 * ASPECT_RATIO_FACTOR;
-    app->window_height = 9 * ASPECT_RATIO_FACTOR;
+    app->window_width = 1280;
+    app->window_height = 780;
 
-    app->window = SDL_CreateWindow("title", (int) app->window_width, (int) app->window_height, SDL_WINDOW_BORDERLESS);
+    app->window = SDL_CreateWindow("title", (int) app->window_width, (int) app->window_height, SDL_WINDOW_VULKAN);
     if (!app->window) {
         SDL_Log("Failed to create window\n%s", SDL_GetError());
         return false;
@@ -384,21 +387,20 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_APP_FAILURE;
     }
 
-    vec3 cam_pos = { 0, 0, 3 };
-    vec3 cam_tar = VEC3_ZERO_INIT;
+    app->rotation_y = 0.0f;
+
+    vec3 cam_pos = { 0, EYE_HEIGHT, 3 };
+    vec3 cam_tar = { 0, EYE_HEIGHT, 0 };
     SDL_memcpy(app->camera.position, cam_pos, sizeof(vec3));
     SDL_memcpy(app->camera.target, cam_tar, sizeof(vec3));
 
     perspective_lh_zo(
         rad(60.0f),
-        16.0f / 9.0f,
+        (float)app->window_width / (float)app->window_height,
         0.01f,
         1000.0f,
         app->camera.projection
     );
-    lookat_lh(app->camera.position, app->camera.target, YUP, app->camera.view);
-
-    app->rotation_y = 0.0f;
 
     app->time.last_ticks = SDL_GetTicks();
 
@@ -411,16 +413,49 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 
     switch (event->type)
     {
+        case SDL_EVENT_KEY_DOWN:
+            key_down[event->key.scancode] = true;
+            break;
         case SDL_EVENT_KEY_UP:
             if (event->key.key == SDLK_ESCAPE) {
                 return SDL_APP_SUCCESS;
-            } else {
-                break;
             }
+            key_down[event->key.scancode] = false;
+            break;
+        case SDL_EVENT_MOUSE_MOTION:
+            vec2 mouse_motion = { event->motion.xrel, event->motion.yrel };
+            vec2_add(mouse_motion, mouse_move, mouse_move);
+            break;
         case SDL_EVENT_QUIT:
             return SDL_APP_SUCCESS;
     }
     return SDL_APP_CONTINUE;
+}
+
+void update_camera(Camera *camera, float dt)
+{
+    vec2 move_input = { 0, 0 };
+    if      (key_down[SDL_SCANCODE_W]) move_input[1] = 1;
+    else if (key_down[SDL_SCANCODE_S]) move_input[1] = -1;
+    if      (key_down[SDL_SCANCODE_A]) move_input[0] = 1;
+    else if (key_down[SDL_SCANCODE_D]) move_input[0] = -1;
+
+    SDL_Log(VEC2_FMT, mouse_move[0], mouse_move[1]);
+    vec2_zero(mouse_move);
+
+    vec3 xforward, xright;
+    vec3 move_dir = { 0, 0, 0 };
+
+    vec3_scale(FORWARD, move_input[1], xforward);
+    vec3_scale(RIGHT, move_input[0], xright);
+    vec3_add(xforward, xright, move_dir);
+    vec3_normalize(move_dir);
+
+    vec3 motion = { 0, 0, 0 };
+    vec3_scale(move_dir, MOVE_SPEED * dt, motion);
+
+    vec3_add(camera->position, motion, camera->position);
+    vec3_add(camera->position, FORWARD, camera->target);
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate)
@@ -433,19 +468,8 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     time->last_ticks = time->new_ticks;
 
     // update game state
-    app->rotation_y += (SDL_PI_F / 2) * app->time.delta_time;
-
-    vec3 translation = { 0, 0, 0 };
-    vec3 rotation    = { 0, 1, 0 };
-    mat4 translate_mat, rotate_mat;
-    translate_make(translate_mat, translation);
-    rotate_make(rotate_mat, app->rotation_y, rotation);
-
-    mat4_mul(
-        translate_mat,
-        rotate_mat,
-        app->camera.model
-    );
+    app->rotation_y += rad(90.0f) * app->time.delta_time;
+    update_camera(&app->camera, time->delta_time);
 
     // render
     SDL_GPUCommandBuffer *cmd_buf = SDL_AcquireGPUCommandBuffer(app->gpu);
@@ -455,6 +479,19 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 
     SDL_GPUTexture *swapchain_tex = NULL;
     SDL_WaitAndAcquireGPUSwapchainTexture(cmd_buf, app->window, &swapchain_tex, NULL, NULL);
+
+    vec3 translation = { 0, 0, 0 };
+    vec3 rotation    = { 0, 1, 0 };
+    mat4 translate_mat, rotate_mat;
+
+    lookat_lh(app->camera.position, app->camera.target, YUP, app->camera.view);
+    translate_make(translate_mat, translation);
+    rotate_make(rotate_mat, app->rotation_y, rotation);
+    mat4_mul(
+        translate_mat,
+        rotate_mat,
+        app->camera.model
+    );
 
     mat4 *matrices[] = {
         &app->camera.projection,

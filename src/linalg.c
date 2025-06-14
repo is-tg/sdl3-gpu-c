@@ -10,6 +10,22 @@ float deg(float rad)
     return rad * 180.0f / SDL_PI_F;
 }
 
+bool vec2_equals(vec2 a, vec2 b)
+{
+    return a[0] == b[0] && a[1] == b[1];
+}
+
+void vec2_zero(vec2 v)
+{
+    v[0] = v[1] = 0.0f;
+}
+
+void vec2_add(vec2 a, vec2 b, vec2 dest)
+{
+    dest[0] = a[0] + b[0];
+    dest[1] = a[1] + b[1];
+}
+
 void vec3_zero(vec3 v)
 {
     v[0] = v[1] = v[2] = 0.0f;
@@ -20,6 +36,13 @@ void vec3_copy(vec3 a, vec3 dest)
     dest[0] = a[0];
     dest[1] = a[1];
     dest[2] = a[2];
+}
+
+void vec3_add(vec3 a, vec3 b, vec3 dest)
+{
+    dest[0] = a[0] + b[0];
+    dest[1] = a[1] + b[1];
+    dest[2] = a[2] + b[2];
 }
 
 void vec3_sub(vec3 a, vec3 b, vec3 dest)
@@ -147,10 +170,13 @@ void mat4_mul(mat4 m1, mat4 m2, mat4 dest)
 
 void mat4_mulN(mat4 * __restrict matrices[], uint32_t len, mat4 dest)
 {
-    if (len < 2) {
+    if (len == 0) return;
+    if (len == 1) {
         mat4_copy(*matrices[0], dest);
         return;
     }
+
+    mat4_mul(*matrices[0], *matrices[1], dest);
 
     for (uint32_t i = 2; i < len; i++) {
         mat4_mul(dest, *matrices[i], dest);
