@@ -53,12 +53,14 @@ typedef ALIGN(16) vec4  mat4[4];
 #define VEC2_FMT "{%f, %f}"
 #define VEC3_FMT "{%f, %f, %f}"
 
+float wrap(float x, float y);
 float rad(float deg);
 float deg(float rad);
 
 bool vec2_equals(vec2 a, vec2 b);
 void vec2_zero(vec2 v);
 void vec2_add(vec2 a, vec2 b, vec2 dest);
+void vec2_scale(vec2 v, float s, vec2 dest);
 
 void  vec3_zero(vec3 v);
 void  vec3_copy(vec3 a, vec3 dest);
@@ -73,6 +75,7 @@ void  vec3_normalize(vec3 v);
 void  vec3_normalize_to(vec3 v, vec3 dest);
 void  vec3_crossn(vec3 a, vec3 b, vec3 dest);
 
+void mat4_mulv3(mat4 m, vec3 v, float last, vec3 dest);
 void mat4_copy(mat4 mat, mat4 dest);
 void mat4_zero(mat4 mat);
 void mat4_identity(mat4 mat);
@@ -84,4 +87,5 @@ void rotate_make(mat4 m, float angle, vec3 axis);
 
 void perspective_lh_zo(float fovy, float aspect, float nearZ, float farZ, mat4 dest);
 void lookat_lh(vec3 eye, vec3 center, vec3 up, mat4 dest);
+void euler_xyz(vec3 angles, mat4 dest);
 

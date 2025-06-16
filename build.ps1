@@ -1,43 +1,26 @@
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
 
-$project_root = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$shaders_dir = "$project_root/shaders"
-$build_dir = "$project_root/build"
-$exe_path = "$build_dir/bin/app.exe"
+$shadercross  = "tools/shadercross.exe"
+$shaderSrcDir = "assets/shaders/src"
+$shaderOutDir = "assets/shaders/out"
+$formats = @("spv", "dxil", "msl")
 
-if (-not (Test-Path $build_dir)) {
-    Write-Error "❌ No build directory in project root."
-}
-
-function Confirm-Tasks {
-    param (
-        [string]$Message,
-        [string[]]$Tasks
-    )
-
-    $input = Read-Host "$Message (Enter to continue, anything else to cancel)"
-    if ([string]::IsNullOrWhiteSpace($input)) {
-        foreach ($task in $Tasks) {
-            Invoke-Expression $task
+Get-ChildItem $shaderSrcDir -File | ForEach-Object {
+    $basename = $_.BaseName
+    foreach ($format in $formats) {
+        $outFile = "$shaderOutDir/$basename.$format"
+        & $shadercross $_.FullName -o $outFile
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "> ಠ_ಠ failed: $($_.Name) → $format"
+            exit 1
         }
-    } else {
-        Write-Host "⚠️ Cancelled."
     }
 }
 
-Set-Location $project_root
+cmake --build build/
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "> ಠ_ಠ build failed"
+    exit 1
+}
 
-Confirm-Tasks "Compile shaders?" @(
-    "glslc $shaders_dir\shader.glsl.frag -o $shaders_dir\compiled\shader.frag.spv",
-    "glslc $shaders_dir\shader.glsl.vert -o $shaders_dir\compiled\shader.vert.spv"
-)
-
-Write-Host "🔧 Compiling project..."
-cmake --build $build_dir
-
-Confirm-Tasks "Run application?" @(
-    {
-        & $exe_path
-    }
-)
+& "$PSScriptRoot/build/bin/app.exe"

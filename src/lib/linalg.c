@@ -1,5 +1,11 @@
 #include "linalg.h"
 
+float wrap(float x, float y)
+{
+    float tmp = SDL_fmodf(x, y);
+    return tmp < 0 ? y + tmp : tmp;
+}
+
 float rad(float deg)
 {
     return deg * SDL_PI_F / 180.0f;
@@ -24,6 +30,12 @@ void vec2_add(vec2 a, vec2 b, vec2 dest)
 {
     dest[0] = a[0] + b[0];
     dest[1] = a[1] + b[1];
+}
+
+void vec2_scale(vec2 v, float s, vec2 dest)
+{
+    dest[0] = v[0] * s;
+    dest[1] = v[1] * s;
 }
 
 void vec3_zero(vec3 v)
@@ -113,6 +125,29 @@ void vec3_crossn(vec3 a, vec3 b, vec3 dest)
     vec3_normalize(dest);
 }
 
+void demote_vec4(vec4 v4, vec3 dest)
+{
+    dest[0] = v4[0];
+    dest[1] = v4[1];
+    dest[2] = v4[2];
+}
+
+void promote_vec3(vec3 v3, float last, vec4 dest)
+{
+    dest[0] = v3[0];
+    dest[1] = v3[1];
+    dest[2] = v3[2];
+    dest[3] = last;
+}
+
+void vec4_copy(vec4 a, vec4 dest)
+{
+    dest[0] = a[0];
+    dest[1] = a[1];
+    dest[2] = a[2];
+    dest[3] = a[3];
+}
+
 void mat4_copy(mat4 mat, mat4 dest)
 {
     dest[0][0] = mat[0][0];  dest[1][0] = mat[1][0];
@@ -136,6 +171,24 @@ void mat4_identity(mat4 mat)
 {
     ALIGN(16) mat4 t = MAT4_IDENTITY_INIT;
     mat4_copy(t, mat);
+}
+
+void mat4_mulv(mat4 m, vec4 v, vec4 dest)
+{
+    vec4 res;  // avoid issues if arrays overlap
+    res[0] = m[0][0] * v[0] + m[1][0] * v[1] + m[2][0] * v[2] + m[3][0] * v[3];
+    res[1] = m[0][1] * v[0] + m[1][1] * v[1] + m[2][1] * v[2] + m[3][1] * v[3];
+    res[2] = m[0][2] * v[0] + m[1][2] * v[1] + m[2][2] * v[2] + m[3][2] * v[3];
+    res[3] = m[0][3] * v[0] + m[1][3] * v[1] + m[2][3] * v[2] + m[3][3] * v[3];
+    vec4_copy(res, dest);
+}
+
+void mat4_mulv3(mat4 m, vec3 v, float last, vec3 dest)
+{
+    vec4 res;
+    promote_vec3(v, last, res);
+    mat4_mulv(m, res, res);
+    demote_vec4(res, dest);
 }
 
 void mat4_mul(mat4 m1, mat4 m2, mat4 dest)
@@ -252,4 +305,34 @@ void lookat_lh(vec3 eye, vec3 center, vec3 up, mat4 dest)
     dest[3][2] = -vec3_dot(f, eye);
     dest[0][3] = dest[1][3] = dest[2][3] = 0.0f;
     dest[3][3] = 1.0f;
+}
+
+void euler_xyz(vec3 angles, mat4 dest)
+{
+    float cx, cy, cz, sx, sy, sz, czsx, cxcz, sysz;
+
+    sx   = SDL_sinf(angles[0]); cx = SDL_cosf(angles[0]);
+    sy   = SDL_sinf(angles[1]); cy = SDL_cosf(angles[1]);
+    sz   = SDL_sinf(angles[2]); cz = SDL_cosf(angles[2]);
+
+    czsx = cz * sx;
+    cxcz = cx * cz;
+    sysz = sy * sz;
+
+    dest[0][0] =  cy * cz;
+    dest[0][1] =  czsx * sy + cx * sz;
+    dest[0][2] = -cxcz * sy + sx * sz;
+    dest[1][0] = -cy * sz;
+    dest[1][1] =  cxcz - sx * sysz;
+    dest[1][2] =  czsx + cx * sysz;
+    dest[2][0] =  sy;
+    dest[2][1] = -cy * sx;
+    dest[2][2] =  cx * cy;
+    dest[0][3] =  0.0f;
+    dest[1][3] =  0.0f;
+    dest[2][3] =  0.0f;
+    dest[3][0] =  0.0f;
+    dest[3][1] =  0.0f;
+    dest[3][2] =  0.0f;
+    dest[3][3] =  1.0f;
 }
