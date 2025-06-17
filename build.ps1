@@ -3,7 +3,7 @@ Set-Location $PSScriptRoot
 $shadercross  = "tools/shadercross.exe"
 $shaderSrcDir = "assets/shaders/src"
 $shaderOutDir = "assets/shaders/out"
-$formats = @("spv", "dxil", "msl")
+$formats = @("spv", "dxil", "json")
 
 Get-ChildItem $shaderSrcDir -File | ForEach-Object {
     $basename = $_.BaseName
