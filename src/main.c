@@ -8,6 +8,7 @@
 #include <SDL3/SDL.h>
 #include "lib/stb_image.h"
 #include "lib/fast_obj.h"
+#include "lib/cJSON.h"
 #include "lib/linalg.h"
 
 typedef struct {
@@ -37,6 +38,13 @@ typedef struct {
 } Look;
 
 typedef struct {
+    Uint32 num_samplers;
+    Uint32 num_storage_textures;
+    Uint32 num_storage_buffers;
+    Uint32 num_uniform_buffers;
+} ShaderInfo;
+
+typedef struct {
     ALIGN(16) mat4 mvp;
 } UniformBufferObject;
 
@@ -44,16 +52,23 @@ typedef struct {
     TimeState time;
     Uint32 window_width;
     Uint32 window_height;
+    SDL_FColor clear_color;
     
     SDL_Window *window;
     SDL_GPUDevice *gpu;
     SDL_GPUGraphicsPipeline *pipeline;
     SDL_GPUTexture *depth_texture;
+    SDL_GPUTextureFormat depth_texture_format;
+    SDL_GPUTextureFormat swapchain_texture_format;
     SDL_GPUSampler *sampler;
+
+    bool key_down[SDL_SCANCODE_COUNT];
+    vec2 mouse_move;
     
     Camera camera;
     Look look;
     Model model;
+    bool rotate;
     float rotation_y;
 
     UniformBufferObject ubo;
@@ -66,18 +81,16 @@ typedef struct {
     vec2 uv;
 } Vertex;
 
-#define WHITE_COLOR 0xFFFFFF
-#define DARK_COLOR 0x1A1A1D
+// linear colors
+#define WHITE_COLOR ((SDL_FColor){ 1, 1, 1, 1 })
+#define DARK_COLOR  ((SDL_FColor){ 0.01098f, 0.01098f, 0.01385f, 1 })
 #define EYE_HEIGHT 1
 #define MOVE_SPEED 5
 #define LOOK_SENSITIVITY 0.3f
 
-SDL_GPUTextureFormat depth_texture_format = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
-bool key_down[SDL_SCANCODE_COUNT] = { 0 };
-vec2 mouse_move;
-
 SDL_FColor RGBA_F(Uint32 hex, float alpha);
-SDL_GPUShader *LoadShader(SDL_GPUDevice *device, const char *shaderfile, Uint32 num_samplers, Uint32 num_uniform_buffers);
+SDL_GPUShader *LoadShader(SDL_GPUDevice *device, const char *shaderfile);
+ShaderInfo load_shader_info(const char *shaderfile);
 
 bool app_create(void **appstate, AppState **app)
 {
@@ -93,9 +106,9 @@ bool app_create(void **appstate, AppState **app)
     return true;
 }
 
-void try_depth_format(SDL_GPUDevice *device, SDL_GPUTextureFormat format) {
+void try_depth_format(SDL_GPUDevice *device, SDL_GPUTextureFormat *depth_texture_format, SDL_GPUTextureFormat format) {
     if (SDL_GPUTextureSupportsFormat(device, format, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
-        depth_texture_format = format;
+        *depth_texture_format = format;
     }
 }
 
@@ -121,12 +134,16 @@ bool app_init(AppState *app)
         return false;
     }
 
-    try_depth_format(app->gpu, SDL_GPU_TEXTUREFORMAT_D32_FLOAT);
-    try_depth_format(app->gpu, SDL_GPU_TEXTUREFORMAT_D24_UNORM);
-    SDL_Log("Using texture format: %d", depth_texture_format);
+    SDL_SetGPUSwapchainParameters(app->gpu, app->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR, SDL_GPU_PRESENTMODE_VSYNC);
+    app->swapchain_texture_format = SDL_GetGPUSwapchainTextureFormat(app->gpu, app->window);
+
+    app->depth_texture_format = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
+    try_depth_format(app->gpu, &app->depth_texture_format, SDL_GPU_TEXTUREFORMAT_D32_FLOAT);
+    try_depth_format(app->gpu, &app->depth_texture_format, SDL_GPU_TEXTUREFORMAT_D24_UNORM);
+    // SDL_Log("Using texture format: %d", depth_texture_format);
 
     SDL_GPUTextureCreateInfo depth_tex_createinfo = {
-        .format = depth_texture_format,
+        .format = app->depth_texture_format,
         .usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
         .width = app->window_width,
         .height = app->window_height,
@@ -140,8 +157,8 @@ bool app_init(AppState *app)
 
 bool setup_pipeline(AppState *app)
 {
-    SDL_GPUShader *vertex_shader = LoadShader(app->gpu, "shader.vert", 0, 1);
-    SDL_GPUShader *fragment_shader = LoadShader(app->gpu, "shader.frag", 1, 0);
+    SDL_GPUShader *vertex_shader = LoadShader(app->gpu, "shader.vert");
+    SDL_GPUShader *fragment_shader = LoadShader(app->gpu, "shader.frag");
     if (!vertex_shader || !fragment_shader) {
         SDL_ReleaseGPUShader(app->gpu, vertex_shader);
         SDL_ReleaseGPUShader(app->gpu, fragment_shader);
@@ -193,10 +210,10 @@ bool setup_pipeline(AppState *app)
         .target_info = (SDL_GPUGraphicsPipelineTargetInfo) {
             .num_color_targets = 1,
             .color_target_descriptions = &(SDL_GPUColorTargetDescription) {
-                .format = SDL_GetGPUSwapchainTextureFormat(app->gpu, app->window),
+                .format = app->swapchain_texture_format,
             },
             .has_depth_stencil_target = true,
-            .depth_stencil_format = depth_texture_format,
+            .depth_stencil_format = app->depth_texture_format,
         }
     };
     app->pipeline = SDL_CreateGPUGraphicsPipeline(app->gpu, &pipeline_createinfo);
@@ -229,7 +246,7 @@ bool load_model(AppState *app, const char *meshfile, const char *texturefile)
     Uint32 pixels_byte_size = img_width * img_height * 4;
 
     SDL_GPUTextureCreateInfo texture_createinfo = {
-        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB,
         .usage  = SDL_GPU_TEXTUREUSAGE_SAMPLER,
         .width  = img_width,
         .height = img_height,
@@ -263,14 +280,13 @@ bool load_model(AppState *app, const char *meshfile, const char *texturefile)
         return false;
     }
 
-    SDL_FColor white = RGBA_F(WHITE_COLOR, 1);
     for (size_t i = 0; i < model->index_count; ++i) {
         fastObjIndex idx = mesh->indices[i];
 
         float *positions = &mesh->positions[idx.p * 3];
         SDL_memcpy(vertices[i].pos, positions, sizeof(vec3));
 
-        vertices[i].color = white;
+        vertices[i].color = WHITE_COLOR;
 
         if (idx.t != 0) {
             float *texcoords = &mesh->texcoords[2 * idx.t];
@@ -409,6 +425,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
         return SDL_APP_FAILURE;
     }
 
+    app->rotate = true;
     app->rotation_y = 0.0f;
 
     vec3 cam_pos = { 0, EYE_HEIGHT, 3 };
@@ -426,28 +443,29 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 
     SDL_SetWindowRelativeMouseMode(app->window, true);
     app->time.last_ticks = SDL_GetTicks();
+    app->clear_color = DARK_COLOR;
 
     return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
-    (void) appstate;
+    AppState *app = (AppState *)appstate;
 
     switch (event->type)
     {
         case SDL_EVENT_KEY_DOWN:
-            key_down[event->key.scancode] = true;
+            app->key_down[event->key.scancode] = true;
             break;
         case SDL_EVENT_KEY_UP:
             if (event->key.key == SDLK_ESCAPE) {
                 return SDL_APP_SUCCESS;
             }
-            key_down[event->key.scancode] = false;
+            app->key_down[event->key.scancode] = false;
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            mouse_move[0] = event->motion.xrel;
-            mouse_move[1] = event->motion.yrel;
+            app->mouse_move[0] = event->motion.xrel;
+            app->mouse_move[1] = event->motion.yrel;
             break;
         case SDL_EVENT_QUIT:
             return SDL_APP_SUCCESS;
@@ -461,16 +479,16 @@ void update_camera(AppState *app, float dt)
     Look   *look   = &app->look;
 
     // Handle look input
-    look->yaw   = wrap(look->yaw + mouse_move[0] * LOOK_SENSITIVITY, 360);
-    look->pitch = SDL_clamp(look->pitch - mouse_move[1] * LOOK_SENSITIVITY, -89, 89);
-    vec2_zero(mouse_move);
+    look->yaw   = wrap(look->yaw + app->mouse_move[0] * LOOK_SENSITIVITY, 360);
+    look->pitch = SDL_clamp(look->pitch - app->mouse_move[1] * LOOK_SENSITIVITY, -89, 89);
+    vec2_zero(app->mouse_move);
 
     // Handle movement input
     vec2 move_input = { 0, 0 };
-    if      (key_down[SDL_SCANCODE_W]) move_input[1] = 1;
-    else if (key_down[SDL_SCANCODE_S]) move_input[1] = -1;
-    if      (key_down[SDL_SCANCODE_A]) move_input[0] = 1;
-    else if (key_down[SDL_SCANCODE_D]) move_input[0] = -1;
+    if      (app->key_down[SDL_SCANCODE_W]) move_input[1] = 1;
+    else if (app->key_down[SDL_SCANCODE_S]) move_input[1] = -1;
+    if      (app->key_down[SDL_SCANCODE_A]) move_input[0] = 1;
+    else if (app->key_down[SDL_SCANCODE_D]) move_input[0] = -1;
 
     // Calculate look matrix from yaw and pitch
     mat4 look_mat;
@@ -511,7 +529,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     time->last_ticks = time->new_ticks;
 
     // update game state
-    app->rotation_y += rad(90.0f) * app->time.delta_time;
+    if (app->rotate) app->rotation_y += rad(90.0f) * app->time.delta_time;
     update_camera(app, time->delta_time);
 
     // render
@@ -547,7 +565,7 @@ SDL_AppResult SDL_AppIterate(void *appstate)
     if (swapchain_tex) {
         SDL_GPUColorTargetInfo color_target = {
             .texture = swapchain_tex,
-            .clear_color = RGBA_F(DARK_COLOR, 1.0f),
+            .clear_color = app->clear_color,
             .load_op = SDL_GPU_LOADOP_CLEAR,
             .store_op = SDL_GPU_STOREOP_STORE,
         };
@@ -624,7 +642,7 @@ SDL_FColor RGBA_F(Uint32 hex, float alpha)
     };
 }
 
-SDL_GPUShader *LoadShader(SDL_GPUDevice *device, const char *shaderfile, Uint32 num_samplers, Uint32 num_uniform_buffers)
+SDL_GPUShader *LoadShader(SDL_GPUDevice *device, const char *shaderfile)
 {
     SDL_GPUShaderStage stage;
 
@@ -656,15 +674,18 @@ SDL_GPUShader *LoadShader(SDL_GPUDevice *device, const char *shaderfile, Uint32 
         SDL_LogCritical(SDL_LOG_CATEGORY_GPU, "No supported shader format: %u", supported_formats);
     }
 
-    char filepath[256];
-    SDL_snprintf(filepath, sizeof(filepath), "assets/shaders/out/%s.%s", shaderfile, format_ext);
+    char pathbuffer[256], filename[256];
+    SDL_snprintf(pathbuffer, sizeof(pathbuffer), "assets/shaders/out/%s", shaderfile);
+    SDL_snprintf(filename, sizeof(filename), "%s.%s", pathbuffer, format_ext);
     
     size_t codesize;
-    void *code = SDL_LoadFile(filepath, &codesize);
+    void *code = SDL_LoadFile(filename, &codesize);
     if (!code) {
         SDL_Log("Failed to load shader file: %s", shaderfile);
         return NULL;
     }
+
+    ShaderInfo info = load_shader_info(pathbuffer);
 
     SDL_GPUShaderCreateInfo shader_createinfo = {
         .code_size = codesize,
@@ -672,8 +693,10 @@ SDL_GPUShader *LoadShader(SDL_GPUDevice *device, const char *shaderfile, Uint32 
         .entrypoint = entrypoint,
         .format = format,
         .stage = stage,
-        .num_samplers = num_samplers,
-        .num_uniform_buffers = num_uniform_buffers,
+        .num_samplers = info.num_samplers,
+        .num_uniform_buffers = info.num_uniform_buffers,
+        .num_storage_buffers = info.num_storage_buffers,
+        .num_storage_textures = info.num_storage_textures,
     };
     SDL_GPUShader *shader = SDL_CreateGPUShader(device, &shader_createinfo);
     
@@ -682,3 +705,38 @@ SDL_GPUShader *LoadShader(SDL_GPUDevice *device, const char *shaderfile, Uint32 
     return shader;
 }
 
+ShaderInfo load_shader_info(const char *shaderfile)
+{
+    ShaderInfo info = {0};
+
+    char filename[256];
+    SDL_snprintf(filename, sizeof(filename), "%s.json", shaderfile);
+
+    size_t file_size = 0;
+    char *file_data = (char *)SDL_LoadFile(filename, &file_size);
+    if (!file_data) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "JSON Load Error", SDL_GetError(), NULL);
+        return info;
+    }
+
+    cJSON *json = cJSON_Parse(file_data);
+    if (!json) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to parse JSON");
+        SDL_free(file_data);
+        return info;
+    }
+
+    #define JSON_GET_UINT(json, name) \
+        ((Uint32)(cJSON_GetObjectItemCaseSensitive((json), (name)) ? \
+        cJSON_GetObjectItemCaseSensitive((json), (name))->valueint : 0))
+
+    info.num_samplers         = JSON_GET_UINT(json, "samplers");
+    info.num_storage_textures = JSON_GET_UINT(json, "storage_textures");
+    info.num_storage_buffers  = JSON_GET_UINT(json, "storage_buffers");
+    info.num_uniform_buffers  = JSON_GET_UINT(json, "uniform_buffers");
+
+    cJSON_Delete(json);
+    SDL_free(file_data);
+
+    return info;
+}
