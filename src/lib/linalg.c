@@ -6,16 +6,6 @@ float wrap(float x, float y)
     return tmp < 0 ? y + tmp : tmp;
 }
 
-float rad(float deg)
-{
-    return deg * SDL_PI_F / 180.0f;
-}
-
-float deg(float rad)
-{
-    return rad * 180.0f / SDL_PI_F;
-}
-
 bool vec2_equals(vec2 a, vec2 b)
 {
     return a[0] == b[0] && a[1] == b[1];
@@ -99,7 +89,7 @@ void vec3_normalize(vec3 v)
 {
     float norm = vec3_norm(v);
 
-    if (UNLIKELY(norm < FLT_EPSILON)) {
+    if (UNLIKELY(norm < SDL_FLT_EPSILON)) {
         v[0] = v[1] = v[2] = 0.0f;
         return;
     }
@@ -111,7 +101,7 @@ void vec3_normalize_to(vec3 v, vec3 dest)
 {
     float norm = vec3_norm(v);
 
-    if (UNLIKELY(norm < FLT_EPSILON)) {
+    if (UNLIKELY(norm < SDL_FLT_EPSILON)) {
         vec3_zero(dest);
         return;
     }

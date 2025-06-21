@@ -14,8 +14,6 @@
 #  define LIKELY(expr)   (expr)
 #endif
 
-#define FLT_EPSILON 1e-5f
-
 #include <SDL3/SDL.h>
 
 typedef float vec2[2];
@@ -50,12 +48,14 @@ typedef ALIGN(16) vec4  mat4[4];
 #define MAT4_IDENTITY ((mat4)MAT4_IDENTITY_INIT)
 #define MAT4_ZERO     ((mat4)MAT4_ZERO_INIT)
 
+#define TAU 6.28318530717958647692528676655900576f
+#define RAD_PER_DEG (TAU / 360.0f)
+#define DEG_PER_RAD (360.0f / TAU)
+
 #define VEC2_FMT "{%f, %f}"
 #define VEC3_FMT "{%f, %f, %f}"
 
 float wrap(float x, float y);
-float rad(float deg);
-float deg(float rad);
 
 bool vec2_equals(vec2 a, vec2 b);
 void vec2_zero(vec2 v);
