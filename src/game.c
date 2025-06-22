@@ -9,14 +9,63 @@ void game_init(AppState *app)
     SDL_GPUCommandBuffer *copy_cmd_buf = SDL_AcquireGPUCommandBuffer(app->gpu);
     SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(copy_cmd_buf);
 
-    load_model(app, copy_pass, "colormap.png", "model.obj");
+    SDL_GPUTexture *colormap = load_texture_file(app->gpu, copy_pass, "colormap.png");
+
+    Model models[] = {
+        {
+            .mesh = load_obj_file(app->gpu, copy_pass, "tractor-police.obj"),
+            .texture = colormap,
+        },
+        {
+            .mesh = load_obj_file(app->gpu, copy_pass, "race-future.obj"),
+            .texture = colormap,
+        },
+        {
+            .mesh = load_obj_file(app->gpu, copy_pass, "cube.obj"),
+            .texture = load_texture_file(app->gpu, copy_pass, "aju.jpg"),
+        }
+    };
+    app->model_count = sizeof(models) / sizeof(models[0]);
+    if (app->model_count > MAX_MODELS) {
+        SDL_Log("models overflow: expected < %d (got %d)", MAX_MODELS, app->model_count);
+        SDL_Quit();
+    }
+    SDL_memcpy(app->models, models, sizeof(models));
 
     SDL_EndGPUCopyPass(copy_pass);
-    if (!SDL_SubmitGPUCommandBuffer(copy_cmd_buf))
+    if (!SDL_SubmitGPUCommandBuffer(copy_cmd_buf)) {
         SDL_LogError(SDL_LOG_CATEGORY_ERROR, "failed model loading");
+        SDL_Quit();
+    }
+
+    quat r1 = {0}, r2 = {0};
+    quat_angle_axis(15 * RAD_PER_DEG, YUP, r1);
+    quat_angle_axis(-15 * RAD_PER_DEG, YUP, r2);
+    Entity entities[] = {
+        {
+            .model_id = 0,
+            .position = { 2.5f, 0, 0 },
+            .rotation = { r1[0], r1[1], r1[2], r1[3] },
+        },
+        {
+            .model_id = 1,
+            .position = { -2.5f, 0, 0 },
+            .rotation = { r2[0], r2[1], r2[2], r2[3] },
+        },
+        {
+            .model_id = 2,
+            .position = { 0, 0.8f, 0 },
+            .rotation = QUAT_IDENTITY_INIT,
+        },
+    };
+    app->entity_count = sizeof(entities) / sizeof(entities[0]);
+    if (app->entity_count > MAX_ENTITIES) {
+        SDL_Log("models overflow: expected < %d (got %d)", MAX_ENTITIES, app->entity_count);
+        SDL_Quit();
+    }
+    SDL_memcpy(app->entities, entities, sizeof(entities));
 
     app->rotate = true;
-    app->rotation_y = 0.0f;
 
     app->clear_color = DARK_COLOR;
 
@@ -28,40 +77,25 @@ void game_init(AppState *app)
 
 void game_update(AppState *app)
 {
-    if (app->rotate) app->rotation_y += ROTATION_SPEED * app->time.delta_time;
+    if (app->rotate) {
+        quat rotation_y;
+        quat_angle_axis(ROTATION_SPEED * app->time.delta_time, YUP, rotation_y);
+        quat_mul(app->entities[2].rotation, rotation_y, app->entities[2].rotation);
+    }
     update_camera(app, app->time.delta_time);
 }
 
 void game_render(AppState *app, SDL_GPUCommandBuffer *cmd_buf, SDL_GPUTexture *swapchain_tex)
 {
+    mat4 proj_mat, view_mat, model_mat;
     perspective_lh_zo(
         60.0f * RAD_PER_DEG,
         (float)app->window_width / (float)app->window_height,
         0.01f,
         1000.0f,
-        app->camera.projection
+        proj_mat
     );
-
-    vec3 translation = { 0, 0, 0 };
-    vec3 rotation    = { 0, 1, 0 };
-    mat4 translate_mat, rotate_mat;
-
-    lookat_lh(app->camera.position, app->camera.target, YUP, app->camera.view);
-    translate_make(translate_mat, translation);
-    rotate_make(rotate_mat, app->rotation_y, rotation);
-    mat4_mul(
-        translate_mat,
-        rotate_mat,
-        app->camera.model
-    );
-
-    mat4 *matrices[] = {
-        &app->camera.projection,
-        &app->camera.view,
-        &app->camera.model,
-    };
-    UniformBufferObject ubo = {0};
-    mat4_mulN(matrices, 3, ubo.mvp);
+    lookat_lh(app->camera.position, app->camera.target, YUP, view_mat);
 
     SDL_GPUColorTargetInfo color_target = {
         .texture = swapchain_tex,
@@ -76,23 +110,37 @@ void game_render(AppState *app, SDL_GPUCommandBuffer *cmd_buf, SDL_GPUTexture *s
         .store_op = SDL_GPU_STOREOP_DONT_CARE,
     };
     SDL_GPURenderPass *render_pass = SDL_BeginGPURenderPass(cmd_buf, &color_target, 1, &depth_target_info);
-    SDL_PushGPUVertexUniformData(cmd_buf, 0, &ubo, sizeof(ubo));
-    SDL_BindGPUGraphicsPipeline(render_pass, app->pipeline);
-    const Model *model = &app->model;
-    SDL_GPUBufferBinding vert_bindings = {
-        .buffer = model->mesh.vertex_buffer,
-    };
-    SDL_BindGPUVertexBuffers(render_pass, 0, &vert_bindings, 1);
-    SDL_GPUBufferBinding index_bindings = {
-        .buffer = model->mesh.index_buffer,
-    };
-    SDL_BindGPUIndexBuffer(render_pass, &index_bindings, SDL_GPU_INDEXELEMENTSIZE_16BIT);
-    SDL_GPUTextureSamplerBinding tex_bindings = {
-        .sampler = app->sampler,
-        .texture = model->texture,
-    };
-    SDL_BindGPUFragmentSamplers(render_pass, 0, &tex_bindings, 1);
-    SDL_DrawGPUIndexedPrimitives(render_pass, model->mesh.index_count, 1, 0, 0, 0);
+
+    for (int i = 0; i < app->entity_count; i++) {
+        const Entity entity = app->entities[i];
+        mat4_from_trs(entity.position, entity.rotation, VEC3_ONE, model_mat);
+
+        mat4 *matrices[3] = {
+            &proj_mat,
+            &view_mat,
+            &model_mat,
+        };
+        UniformBufferObject ubo = {0};
+        mat4_mulN(matrices, 3, ubo.mvp);
+
+        SDL_PushGPUVertexUniformData(cmd_buf, 0, &ubo, sizeof(ubo));
+        SDL_BindGPUGraphicsPipeline(render_pass, app->pipeline);
+        const Model *model = &app->models[entity.model_id];
+        SDL_GPUBufferBinding vert_bindings = {
+            .buffer = model->mesh.vertex_buffer,
+        };
+        SDL_BindGPUVertexBuffers(render_pass, 0, &vert_bindings, 1);
+        SDL_GPUBufferBinding index_bindings = {
+            .buffer = model->mesh.index_buffer,
+        };
+        SDL_BindGPUIndexBuffer(render_pass, &index_bindings, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+        SDL_GPUTextureSamplerBinding tex_bindings = {
+            .sampler = app->sampler,
+            .texture = model->texture,
+        };
+        SDL_BindGPUFragmentSamplers(render_pass, 0, &tex_bindings, 1);
+        SDL_DrawGPUIndexedPrimitives(render_pass, model->mesh.index_count, 1, 0, 0, 0);
+    }
 
     SDL_EndGPURenderPass(render_pass);
 }

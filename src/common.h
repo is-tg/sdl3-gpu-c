@@ -3,6 +3,9 @@
 #include <SDL3/SDL.h>
 #include "lib/linalg.h"
 
+#define MAX_MODELS 4
+#define MAX_ENTITIES 8
+
 // linear colors
 #define WHITE_COLOR ((SDL_FColor){ 1, 1, 1, 1 })
 #define DARK_COLOR  ((SDL_FColor){ 0.01098f, 0.01098f, 0.01385f, 1 })
@@ -16,9 +19,6 @@ typedef struct {
 typedef struct {
     vec3 position;
     vec3 target;
-    mat4 model;
-    mat4 view;
-    mat4 projection;
 } Camera;
 
 typedef struct {
@@ -42,7 +42,7 @@ typedef int Model_ID;
 typedef struct {
     Model_ID model_id;
     vec3 position;
-    // TODO quaternion stuff
+    quat rotation;
 } Entity;
 
 typedef struct {
@@ -67,8 +67,11 @@ typedef struct {
 
     SDL_FColor clear_color;
     bool rotate;
-    float rotation_y;
-    Model model;
+
+    Model models[MAX_MODELS];
+    int model_count;
+    Entity entities[MAX_ENTITIES];
+    int entity_count;
 
 } AppState;
 

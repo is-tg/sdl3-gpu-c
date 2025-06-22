@@ -14,7 +14,7 @@ SDL_GPUTexture *load_texture_file(SDL_GPUDevice *gpu, SDL_GPUCopyPass *copy_pass
     Uint8 *pixels = stbi_load(tex_filepath, &raw_width, &raw_height, NULL, 4);
     if (!pixels) {
         SDL_Log("Failed to load texture image\n%s", stbi_failure_reason());
-        return NULL;
+        SDL_Quit();
     }
 
     Uint32 img_width = (Uint32) raw_width;
@@ -35,7 +35,7 @@ Mesh load_obj_file(SDL_GPUDevice *gpu, SDL_GPUCopyPass *copy_pass, const char *m
     fastObjMesh *obj_data = fast_obj_read(mesh_filepath);
     if (!obj_data) {
         SDL_Log("Failed to load OBJ file\n%s", SDL_GetError());
-        return (Mesh) {0};
+        SDL_Quit();
     }
 
     Vertex *vertices = SDL_malloc(obj_data->index_count * sizeof *vertices);
@@ -47,7 +47,7 @@ Mesh load_obj_file(SDL_GPUDevice *gpu, SDL_GPUCopyPass *copy_pass, const char *m
         SDL_free(indices);
 
         SDL_Log("Failed to allocate vertices/indices");
-        return (Mesh) {0};
+        SDL_Quit();
     }
 
     for (size_t i = 0; i < obj_data->index_count; ++i) {
@@ -81,12 +81,14 @@ Mesh load_obj_file(SDL_GPUDevice *gpu, SDL_GPUCopyPass *copy_pass, const char *m
     return mesh;
 }
 
-void load_model(AppState *app, SDL_GPUCopyPass *copy_pass, const char *texturefile, const char *meshfile)
+Model load_model(AppState *app, SDL_GPUCopyPass *copy_pass, const char *meshfile, const char *texturefile)
 {
-    Model *model = &app->model;
+    Model model = {0};
 
-    model->texture = load_texture_file(app->gpu, copy_pass, texturefile);
-    model->mesh    = load_obj_file(app->gpu, copy_pass, meshfile);
+    model.texture = load_texture_file(app->gpu, copy_pass, texturefile);
+    model.mesh    = load_obj_file(app->gpu, copy_pass, meshfile);
+
+    return model;
 }
 
 

@@ -159,9 +159,15 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
     if (appstate) {
         AppState *app = (AppState *) appstate;
 
-        SDL_ReleaseGPUBuffer(app->gpu, app->model.mesh.vertex_buffer);
-        SDL_ReleaseGPUBuffer(app->gpu, app->model.mesh.index_buffer);
-        SDL_ReleaseGPUTexture(app->gpu, app->model.texture);
+        Model model;
+        for (int i = 0; i < app->model_count; i++) {
+            model = app->models[i];
+            SDL_ReleaseGPUBuffer(app->gpu, model.mesh.vertex_buffer);
+            SDL_ReleaseGPUBuffer(app->gpu, model.mesh.index_buffer);
+            if (i == 0 || i == 2) {
+                SDL_ReleaseGPUTexture(app->gpu, model.texture);
+            }
+        }
 
         SDL_ReleaseGPUGraphicsPipeline(app->gpu, app->pipeline);
         SDL_ReleaseGPUSampler(app->gpu, app->sampler);

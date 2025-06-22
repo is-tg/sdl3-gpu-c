@@ -6,7 +6,7 @@ float wrap(float x, float y)
     return tmp < 0 ? y + tmp : tmp;
 }
 
-bool vec2_equals(vec2 a, vec2 b)
+bool vec2_equals(const vec2 a, const vec2 b)
 {
     return a[0] == b[0] && a[1] == b[1];
 }
@@ -16,13 +16,13 @@ void vec2_zero(vec2 v)
     v[0] = v[1] = 0.0f;
 }
 
-void vec2_add(vec2 a, vec2 b, vec2 dest)
+void vec2_add(const vec2 a, const vec2 b, vec2 dest)
 {
     dest[0] = a[0] + b[0];
     dest[1] = a[1] + b[1];
 }
 
-void vec2_scale(vec2 v, float s, vec2 dest)
+void vec2_scale(const vec2 v, float s, vec2 dest)
 {
     dest[0] = v[0] * s;
     dest[1] = v[1] * s;
@@ -33,40 +33,40 @@ void vec3_zero(vec3 v)
     v[0] = v[1] = v[2] = 0.0f;
 }
 
-void vec3_copy(vec3 a, vec3 dest)
+void vec3_copy(const vec3 a, vec3 dest)
 {
     dest[0] = a[0];
     dest[1] = a[1];
     dest[2] = a[2];
 }
 
-void vec3_add(vec3 a, vec3 b, vec3 dest)
+void vec3_add(const vec3 a, const vec3 b, vec3 dest)
 {
     dest[0] = a[0] + b[0];
     dest[1] = a[1] + b[1];
     dest[2] = a[2] + b[2];
 }
 
-void vec3_sub(vec3 a, vec3 b, vec3 dest)
+void vec3_sub(const vec3 a, const vec3 b, vec3 dest)
 {
     dest[0] = a[0] - b[0];
     dest[1] = a[1] - b[1];
     dest[2] = a[2] - b[2];
 }
 
-void vec3_scale(vec3 v, float s, vec3 dest)
+void vec3_scale(const vec3 v, float s, vec3 dest)
 {
     dest[0] = v[0] * s;
     dest[1] = v[1] * s;
     dest[2] = v[2] * s;
 }
 
-float vec3_dot(vec3 a, vec3 b)
+float vec3_dot(const vec3 a, const vec3 b)
 {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
-void vec3_cross(vec3 a, vec3 b, vec3 dest)
+void vec3_cross(const vec3 a, const vec3 b, vec3 dest)
 {
     vec3 c;
     c[0] = a[1] * b[2] - a[2] * b[1];
@@ -75,12 +75,12 @@ void vec3_cross(vec3 a, vec3 b, vec3 dest)
     vec3_copy(c, dest);
 }
 
-float vec3_norm2(vec3 v)
+float vec3_norm2(const vec3 v)
 {
     return vec3_dot(v, v);
 }
 
-float vec3_norm(vec3 v)
+float vec3_norm(const vec3 v)
 {
     return SDL_sqrtf(vec3_norm2(v));
 }
@@ -97,7 +97,7 @@ void vec3_normalize(vec3 v)
     vec3_scale(v, 1.0f / norm, v);
 }
 
-void vec3_normalize_to(vec3 v, vec3 dest)
+void vec3_normalize_to(const vec3 v, vec3 dest)
 {
     float norm = vec3_norm(v);
 
@@ -109,20 +109,53 @@ void vec3_normalize_to(vec3 v, vec3 dest)
     vec3_scale(v, 1.0f / norm, dest);
 }
 
-void vec3_crossn(vec3 a, vec3 b, vec3 dest)
+void vec3_crossn(const vec3 a, const vec3 b, vec3 dest)
 {
     vec3_cross(a, b, dest);
     vec3_normalize(dest);
 }
 
-void demote_vec4(vec4 v4, vec3 dest)
+void vec3_to_quat(const vec3 v, float w, quat dest)
+{
+    dest[0] = v[0];
+    dest[1] = v[1];
+    dest[2] = v[2];
+    dest[3] = w;
+}
+
+void quat_angle_axis(float angle_radians, const vec3 axis, quat dest)
+{
+    float t = angle_radians * 0.5f;
+    vec3 v;
+    vec3_copy(axis, v);
+    vec3_normalize(v);
+    vec3_scale(v, SDL_sinf(t), v);
+
+    vec3_to_quat(v, SDL_cosf(t), dest);
+}
+
+void quat_mul(const quat p, const quat q, quat dest)
+{
+    /*
+    + (a1 b2 + b1 a2 + c1 d2 − d1 c2)i
+    + (a1 c2 − b1 d2 + c1 a2 + d1 b2)j
+    + (a1 d2 + b1 c2 − c1 b2 + d1 a2)k
+        a1 a2 − b1 b2 − c1 c2 − d1 d2
+    */
+    dest[0] = p[3] * q[0] + p[0] * q[3] + p[1] * q[2] - p[2] * q[1];
+    dest[1] = p[3] * q[1] - p[0] * q[2] + p[1] * q[3] + p[2] * q[0];
+    dest[2] = p[3] * q[2] + p[0] * q[1] - p[1] * q[0] + p[2] * q[3];
+    dest[3] = p[3] * q[3] - p[0] * q[0] - p[1] * q[1] - p[2] * q[2];
+}
+
+void demote_vec4(const vec4 v4, vec3 dest)
 {
     dest[0] = v4[0];
     dest[1] = v4[1];
     dest[2] = v4[2];
 }
 
-void promote_vec3(vec3 v3, float last, vec4 dest)
+void promote_vec3(const vec3 v3, float last, vec4 dest)
 {
     dest[0] = v3[0];
     dest[1] = v3[1];
@@ -130,15 +163,20 @@ void promote_vec3(vec3 v3, float last, vec4 dest)
     dest[3] = last;
 }
 
-void vec4_copy(vec4 a, vec4 dest)
+void vec4_copy(const vec4 v, vec4 dest)
 {
-    dest[0] = a[0];
-    dest[1] = a[1];
-    dest[2] = a[2];
-    dest[3] = a[3];
+    dest[0] = v[0];
+    dest[1] = v[1];
+    dest[2] = v[2];
+    dest[3] = v[3];
 }
 
-void mat4_copy(mat4 mat, mat4 dest)
+void quat_copy(const quat q, quat dest)
+{
+    vec4_copy(q, dest);
+}
+
+void mat4_copy(const mat4 mat, mat4 dest)
 {
     dest[0][0] = mat[0][0];  dest[1][0] = mat[1][0];
     dest[0][1] = mat[0][1];  dest[1][1] = mat[1][1];
@@ -159,11 +197,20 @@ void mat4_zero(mat4 mat)
 
 void mat4_identity(mat4 mat)
 {
-    ALIGN(16) mat4 t = MAT4_IDENTITY_INIT;
+    mat4 t = MAT4_IDENTITY_INIT;
     mat4_copy(t, mat);
 }
 
-void mat4_mulv(mat4 m, vec4 v, vec4 dest)
+void mat4_scale(const vec3 v, mat4 dest)
+{
+    mat4_zero(dest);
+    dest[0][0] = v[0];
+    dest[1][1] = v[1];
+    dest[2][2] = v[2];
+    dest[3][3] = 1.0f;
+}
+
+void mat4_mulv(const mat4 m, const vec4 v, vec4 dest)
 {
     vec4 res;  // avoid issues if arrays overlap
     res[0] = m[0][0] * v[0] + m[1][0] * v[1] + m[2][0] * v[2] + m[3][0] * v[3];
@@ -173,7 +220,7 @@ void mat4_mulv(mat4 m, vec4 v, vec4 dest)
     vec4_copy(res, dest);
 }
 
-void mat4_mulv3(mat4 m, vec3 v, float last, vec3 dest)
+void mat4_mulv3(const mat4 m, const vec3 v, float last, vec3 dest)
 {
     vec4 res;
     promote_vec3(v, last, res);
@@ -181,7 +228,7 @@ void mat4_mulv3(mat4 m, vec3 v, float last, vec3 dest)
     demote_vec4(res, dest);
 }
 
-void mat4_mul(mat4 m1, mat4 m2, mat4 dest)
+void mat4_mul(const mat4 m1, const mat4 m2, mat4 dest)
 {
     float a00 = m1[0][0], a01 = m1[0][1], a02 = m1[0][2], a03 = m1[0][3],
           a10 = m1[1][0], a11 = m1[1][1], a12 = m1[1][2], a13 = m1[1][3],
@@ -226,31 +273,62 @@ void mat4_mulN(mat4 * __restrict matrices[], uint32_t len, mat4 dest)
     }
 }
 
-void translate_make(mat4 m, vec3 v)
+void mat4_translate(const vec3 v, mat4 m)
 {
     mat4_identity(m);
     vec3_copy(v, m[3]);
 }
 
-void rotate_make(mat4 m, float angle, vec3 axis)
+void mat4_from_quat(const quat q, mat4 m)
 {
-    ALIGN(16) vec3 axisn, v, vs;
-    float c = SDL_cosf(angle);
+    float
+        qxx = q[0] * q[0],
+        qyy = q[1] * q[1],
+        qzz = q[2] * q[2],
+        qxz = q[0] * q[2],
+        qxy = q[0] * q[1],
+        qyz = q[1] * q[2],
+        qwx = q[3] * q[0],
+        qwy = q[3] * q[1],
+        qwz = q[3] * q[2];
 
-    vec3_normalize_to(axis, axisn);
-    vec3_scale(axisn, 1.0f - c, v);
-    vec3_scale(axisn, SDL_sinf(angle), vs);
+    // Column 0
+    m[0][0] = 1.0f - 2.0f * (qyy + qzz);
+    m[0][1] = 2.0f * (qxy + qwz);
+    m[0][2] = 2.0f * (qxz - qwy);
+    m[0][3] = 0.0f;
 
-    vec3_scale(axisn, v[0], m[0]);
-    vec3_scale(axisn, v[1], m[1]);
-    vec3_scale(axisn, v[2], m[2]);
+    // Column 1
+    m[1][0] = 2.0f * (qxy - qwz);
+    m[1][1] = 1.0f - 2.0f * (qxx + qzz);
+    m[1][2] = 2.0f * (qyz + qwx);
+    m[1][3] = 0.0f;
 
-    m[0][0] += c;       m[1][0] -= vs[2];   m[2][0] += vs[1];
-    m[0][1] += vs[2];   m[1][1] += c;       m[2][1] -= vs[0];
-    m[0][2] -= vs[1];   m[1][2] += vs[0];   m[2][2] += c;
+    // Column 2
+    m[2][0] = 2.0f * (qxz + qwy);
+    m[2][1] = 2.0f * (qyz - qwx);
+    m[2][2] = 1.0f - 2.0f * (qxx + qyy);
+    m[2][3] = 0.0f;
 
-    m[0][3] = m[1][3] = m[2][3] = m[3][0] = m[3][1] = m[3][2] = 0.0f;
+    // Column 3 (translation/homogeneous)
+    m[3][0] = 0.0f;
+    m[3][1] = 0.0f;
+    m[3][2] = 0.0f;
     m[3][3] = 1.0f;
+}
+
+void mat4_from_trs(const vec3 t, const quat r, const vec3 s, mat4 dest)
+{
+    mat4 translation, rotation, scale;
+    mat4_translate(t, translation);
+    mat4_from_quat(r, rotation);
+    mat4_scale(s, scale);
+    mat4 *matrices[3] = {
+        &scale,
+        &rotation,
+        &translation,
+    };
+    mat4_mulN(matrices, 3, dest);
 }
 
 // left-handed coordinate system: positive Z goes into the screen
@@ -271,7 +349,7 @@ void perspective_lh_zo(float fovy, float aspect, float nearZ, float farZ, mat4 d
     dest[3][2] = nearZ * farZ * fn;
 }
 
-void lookat_lh(vec3 eye, vec3 center, vec3 up, mat4 dest)
+void lookat_lh(const vec3 eye, const vec3 center, const vec3 up, mat4 dest)
 {
     ALIGN(16) vec3 f, u, s;
 
@@ -297,7 +375,7 @@ void lookat_lh(vec3 eye, vec3 center, vec3 up, mat4 dest)
     dest[3][3] = 1.0f;
 }
 
-void euler_xyz(vec3 angles, mat4 dest)
+void euler_xyz(const vec3 angles, mat4 dest)
 {
     float cx, cy, cz, sx, sy, sz, czsx, cxcz, sysz;
 
